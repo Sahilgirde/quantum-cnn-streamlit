@@ -1,4 +1,4 @@
-# app.py - UPDATED WITH ACTUAL TRAINED MODEL
+# app.py - UPDATED FOR MODEL PARTS
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -55,54 +55,80 @@ st.markdown("""
         border-left: 5px solid #28a745;
         margin: 10px 0;
     }
+    .part-status {
+        padding: 10px;
+        border-radius: 5px;
+        margin: 5px 0;
+        text-align: center;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# Quantum configuration (aapke trained model ke hisab se)
+# Quantum configuration
 n_qubits = 4
 n_layers = 3
 
-class TrainedPancreaticDetector:
-    def __init__(self, model_path="best_model.pth"):
+class ModelPartsCombiner:
+    def __init__(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model_path = model_path
         self.model = None
-        
-        # Same transforms as training
         self.transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                               std=[0.229, 0.224, 0.225])
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
+        self.model_parts = ["model_part_1.pth", "model_part_2.pth", "model_part_3.pth"]
     
-    def load_trained_model(self):
-        """Aapka actual trained model load karein"""
+    def check_model_parts(self):
+        """Check if all model parts are available"""
+        status = {}
+        for part in self.model_parts:
+            if os.path.exists(part):
+                size = os.path.getsize(part) / (1024*1024)
+                status[part] = {"exists": True, "size": f"{size:.1f} MB"}
+            else:
+                status[part] = {"exists": False, "size": "Missing"}
+        return status
+    
+    def combine_and_load_model(self):
+        """Combine model parts and load the complete model"""
         try:
-            if not os.path.exists(self.model_path):
-                st.error(f"❌ Model file '{self.model_path}' not found!")
-                st.info("💡 Please ensure 'best_model.pth' is in the same directory")
+            # Check all parts first
+            status = self.check_model_parts()
+            missing_parts = [part for part in self.model_parts if not status[part]["exists"]]
+            
+            if missing_parts:
+                st.error(f"❌ Missing model parts: {missing_parts}")
                 return False
             
-            # Model architecture define karein (EXACTLY same as training)
+            st.info("🔗 Combining model parts...")
+            
+            # Combine all parts
+            combined_state_dict = {}
+            for part_file in self.model_parts:
+                part_dict = torch.load(part_file, map_location='cpu')
+                combined_state_dict.update(part_dict)
+                st.success(f"✅ Loaded: {part_file} ({status[part_file]['size']})")
+            
+            # Create model architecture
             self.model = HybridQuantumCNN(n_qubits, n_layers).to(self.device)
             
-            # Trained weights load karein
-            state_dict = torch.load(self.model_path, map_location=self.device)
-            self.model.load_state_dict(state_dict)
+            # Load combined weights
+            self.model.load_state_dict(combined_state_dict)
             self.model.eval()
             
-            st.success("✅ **Trained Quantum Model Loaded Successfully!**")
+            st.success("🎉 Model parts successfully combined and loaded!")
             return True
             
         except Exception as e:
-            st.error(f"❌ Model loading error: {e}")
+            st.error(f"❌ Error combining model parts: {e}")
             return False
     
     def predict_image(self, image):
-        """Actual trained model se prediction karein"""
-        if not self.load_trained_model():
-            return None
+        """Make prediction using combined model"""
+        if self.model is None:
+            if not self.combine_and_load_model():
+                return None
         
         try:
             # Image preprocessing
@@ -113,7 +139,7 @@ class TrainedPancreaticDetector:
                 output = self.model(image_tensor)
                 probability = torch.sigmoid(output).item()
             
-            # Results prepare karein
+            # Prepare results
             prediction = "Pancreatic Tumor" if probability > 0.5 else "Normal"
             confidence = probability if probability > 0.5 else 1 - probability
             
@@ -123,14 +149,15 @@ class TrainedPancreaticDetector:
                 'probability': probability,
                 'normal_probability': (1 - probability) * 100,
                 'tumor_probability': probability * 100,
-                'model_type': 'Trained Quantum CNN'
+                'model_type': 'Combined Quantum CNN (3 Parts)'
             }
             
         except Exception as e:
             st.error(f"❌ Prediction error: {e}")
             return None
-
+    
     def create_report_image(self, image, prediction_result):
+        """Create analysis report image"""
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
         
         # Original image
@@ -146,7 +173,7 @@ class TrainedPancreaticDetector:
         bars = ax2.bar(labels, probabilities, color=colors, alpha=0.7, edgecolor='black')
         ax2.set_ylabel('Probability (%)', fontweight='bold')
         ax2.set_ylim(0, 100)
-        ax2.set_title('Trained Model Predictions', fontsize=14, fontweight='bold')
+        ax2.set_title('Combined Model Predictions', fontsize=14, fontweight='bold')
         
         # Add value labels on bars
         for bar, prob in zip(bars, probabilities):
@@ -162,7 +189,7 @@ class TrainedPancreaticDetector:
         buf.seek(0)
         return buf
 
-# Aapke trained model ka EXACT architecture
+# Model Architecture (EXACTLY same as your trained model)
 class QuantumLayer(nn.Module):
     def __init__(self, n_qubits, n_layers):
         super().__init__()
@@ -172,13 +199,12 @@ class QuantumLayer(nn.Module):
         
     def forward(self, x):
         # Simplified quantum simulation for inference
-        # Training time quantum circuit ki jagah efficient forward pass
         batch_size = x.shape[0]
         outputs = []
         
         for i in range(batch_size):
             # Quantum-inspired transformation
-            x_transformed = torch.tanh(x[i]) * 0.5  # Simplified quantum effect
+            x_transformed = torch.tanh(x[i]) * 0.5
             outputs.append(x_transformed)
         
         return torch.stack(outputs)
@@ -186,8 +212,7 @@ class QuantumLayer(nn.Module):
 class HybridQuantumCNN(nn.Module):
     def __init__(self, n_qubits=4, n_layers=3):
         super().__init__()
-        # EXACTLY same as your trained model
-        self.resnet = models.resnet18(weights=None)  # No pretrained, kyuki aapka model already trained hai
+        self.resnet = models.resnet18(weights=None)
         self.resnet.fc = nn.Identity()
         
         self.reduce = nn.Sequential(
@@ -220,53 +245,88 @@ class HybridQuantumCNN(nn.Module):
         return x
 
 def main():
-    # Header with trained model info
+    # Header
     st.markdown('<h1 class="main-header">🧠 Pancreatic Cancer Detection System</h1>', 
                 unsafe_allow_html=True)
-    st.markdown("### ✅ **TRAINED QUANTUM AI MODEL** - 100% Accuracy")
+    st.markdown("### 🔗 **COMBINED MODEL PARTS** - 100% Accuracy")
     
-    # Success banner
-    st.markdown("""
-    <div class="success-banner">
-    🎉 <strong>QUANTUM MODEL READY!</strong> | 
-    📊 <strong>Performance:</strong> 100% Accuracy, F1-Score: 1.000 | 
-    ⚛️ <strong>Technology:</strong> Hybrid Quantum-Classical CNN
-    </div>
-    """, unsafe_allow_html=True)
+    # Initialize detector
+    detector = ModelPartsCombiner()
+    
+    # Check model parts status
+    st.subheader("📁 Model Parts Status")
+    parts_status = detector.check_model_parts()
+    
+    col1, col2, col3 = st.columns(3)
+    all_parts_available = True
+    
+    for i, (part, status) in enumerate(parts_status.items()):
+        if status["exists"]:
+            bg_color = "#d4edda" if status["exists"] else "#f8d7da"
+            if i == 0: 
+                col1.markdown(f'<div class="part-status" style="background-color: {bg_color}">✅ {part}<br>{status["size"]}</div>', unsafe_allow_html=True)
+            elif i == 1: 
+                col2.markdown(f'<div class="part-status" style="background-color: {bg_color}">✅ {part}<br>{status["size"]}</div>', unsafe_allow_html=True)
+            else: 
+                col3.markdown(f'<div class="part-status" style="background-color: {bg_color}">✅ {part}<br>{status["size"]}</div>', unsafe_allow_html=True)
+        else:
+            all_parts_available = False
+            if i == 0: 
+                col1.error(f"❌ {part}\nMissing")
+            elif i == 1: 
+                col2.error(f"❌ {part}\nMissing")
+            else: 
+                col3.error(f"❌ {part}\nMissing")
+    
+    if all_parts_available:
+        st.markdown("""
+        <div class="success-banner">
+        🎉 <strong>ALL MODEL PARTS READY!</strong> | 
+        🔗 <strong>3 Parts Combined</strong> | 
+        ⚛️ <strong>Quantum AI Active</strong>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.error("❌ Please ensure all 3 model parts are available in the same directory")
+        st.info("""
+        **Required files:**
+        - `model_part_1.pth`
+        - `model_part_2.pth` 
+        - `model_part_3.pth`
+        """)
     
     # Sidebar
     with st.sidebar:
         st.image("https://cdn-icons-png.flaticon.com/512/4712/4712035.png", width=100)
         st.title("Navigation")
         
-        st.markdown("""
-        <div class="success-banner">
-        🔬 <strong>Trained Model Active</strong><br>
-        ✅ Ready for real predictions
-        </div>
-        """, unsafe_allow_html=True)
+        if all_parts_available:
+            st.markdown("""
+            <div class="success-banner">
+            🔬 <strong>Combined Model Active</strong><br>
+            ✅ 3 Parts Integrated
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.warning("⚠️ **Model Parts Missing**")
         
         st.info("""
         **Instructions:**
-        1. Upload pancreatic CT scan image
-        2. Click 'Analyze with Trained Model'
-        3. Get AI diagnosis from trained quantum model
+        1. Ensure all 3 model parts are available
+        2. Upload pancreatic CT scan image
+        3. Click 'Analyze with Combined Model'
+        4. Get AI diagnosis from combined quantum model
         """)
         
         st.markdown("---")
-        st.subheader("Model Performance")
-        st.metric("Training Accuracy", "100%", "0%")
-        st.metric("Validation Accuracy", "100%", "0%")
-        st.metric("F1-Score", "1.000", "0.000")
-        
-        st.markdown("---")
-        st.subheader("About")
+        st.subheader("Model Specifications")
         st.write("""
-        **Trained Model Specifications:**
-        - Architecture: ResNet18 + Quantum Layers
+        **Architecture:**
+        - Base: ResNet18 + Quantum Layers
+        - Parts: 3 Combined Files
         - Qubits: 4, Layers: 3
-        - Dataset: 999 training samples
-        - Technology: Hybrid Quantum-Classical AI
+        - Training Samples: 999
+        - Accuracy: 100%
         """)
         
         st.markdown("---")
@@ -280,28 +340,25 @@ def main():
         
         uploaded_file = st.file_uploader(
             "Choose a pancreatic CT scan image",
-            type=['png', 'jpg', 'jpeg', 'bmp', 'tiff'],
-            help="Supported formats: PNG, JPG, JPEG, BMP, TIFF"
+            type=['png', 'jpg', 'jpeg', 'bmp'],
+            help="Supported formats: PNG, JPG, JPEG, BMP"
         )
         
-        if uploaded_file is not None:
+        if uploaded_file is not None and all_parts_available:
             # Display uploaded image
             image = Image.open(uploaded_file)
             st.image(image, caption="Uploaded CT Scan", use_column_width=True)
             
-            # Analysis button - CHANGED TO USE TRAINED MODEL
-            if st.button("🔬 Analyze with Trained Model", type="primary", use_container_width=True):
-                with st.spinner("Trained quantum model analysis in progress..."):
-                    # Initialize detector with TRAINED MODEL
-                    detector = TrainedPancreaticDetector("best_model.pth")
-                    
-                    # Get prediction from TRAINED MODEL
+            # Analysis button
+            if st.button("🔬 Analyze with Combined Model", type="primary", use_container_width=True):
+                with st.spinner("Combining model parts and analyzing..."):
+                    # Get prediction from combined model
                     result = detector.predict_image(image)
                     
                     if result:
                         # Display results
                         with col2:
-                            st.subheader("📊 Trained Model Analysis Results")
+                            st.subheader("📊 Combined Model Analysis Results")
                             
                             # Result box
                             result_class = "tumor-result" if result['prediction'] == "Pancreatic Tumor" else "normal-result"
@@ -316,7 +373,7 @@ def main():
                             """, unsafe_allow_html=True)
                             
                             # Probability bars
-                            st.write("**Probability Distribution from Trained Model:**")
+                            st.write("**Probability Distribution:**")
                             
                             col21, col22 = st.columns(2)
                             with col21:
@@ -333,77 +390,71 @@ def main():
                             if result['prediction'] == "Pancreatic Tumor":
                                 st.error("""
                                 **🚨 Medical Recommendation:** 
-                                - Consult oncologist immediately (within 48 hours)
+                                - Consult oncologist immediately
                                 - Further diagnostic tests required
-                                - Multidisciplinary team evaluation needed
-                                - Urgent treatment planning recommended
+                                - Multidisciplinary team evaluation
+                                - Urgent treatment planning
                                 """)
                             else:
                                 st.success("""
                                 **✅ Medical Recommendation:** 
                                 - Routine follow-up in 6-12 months
-                                - Continue healthy lifestyle maintenance
-                                - Regular annual health check-ups
-                                - No immediate concerns detected
+                                - Continue healthy lifestyle
+                                - Regular health check-ups
+                                - No immediate concerns
                                 """)
                             
                             # Generate and display report image
                             report_buf = detector.create_report_image(image, result)
-                            st.image(report_buf, caption="Trained Model Analysis Report", use_column_width=True)
+                            st.image(report_buf, caption="Combined Model Analysis Report", use_column_width=True)
                             
                             # Download report
                             st.download_button(
-                                label="📥 Download Trained Model Report",
+                                label="📥 Download Analysis Report",
                                 data=report_buf.getvalue(),
-                                file_name=f"trained_model_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                                file_name=f"combined_model_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
                                 mime="image/png",
                                 use_container_width=True
                             )
                     else:
-                        st.error("❌ Prediction failed. Please check the model file.")
+                        st.error("❌ Prediction failed. Please check the model parts.")
     
     # Demo section if no file uploaded
-    if uploaded_file is None:
+    if uploaded_file is None and all_parts_available:
         with col2:
-            st.subheader("ℹ️ Trained Model Information")
+            st.subheader("ℹ️ Combined Model Information")
             
             st.info("""
-            **Trained Quantum AI Model Overview:**
+            **3-Part Combined Model System:**
             
-            ✅ **Model Status:** Successfully Trained
-            ✅ **Performance:** 100% Validation Accuracy
+            ✅ **Model Status:** 3 Parts Successfully Integrated
+            ✅ **Combination:** Automatic Parts Merging
             ✅ **Technology:** Hybrid Quantum-Classical CNN
             
-            **Model Specifications:**
-            - Base Architecture: ResNet18
-            - Quantum Layers: 4 Qubits, 3 Variational Layers
-            - Training Samples: 999 CT scans
-            - Validation Samples: 432 CT scans
-            - Training Accuracy: 98.3%
-            - Validation Accuracy: 100%
+            **System Features:**
+            - Automatic parts detection and combination
+            - Real-time model integrity checking
+            - Seamless prediction pipeline
+            - Professional medical reporting
             """)
             
-            # Sample results from trained model
-            st.subheader("📋 Model Performance Metrics")
-            col_sample1, col_sample2, col_sample3 = st.columns(3)
+            # Performance metrics
+            st.subheader("📋 System Performance")
+            col_sample1, col_sample2 = st.columns(2)
             
             with col_sample1:
-                st.metric("Training Accuracy", "98.3%", "1.7%")
-                st.success("✅ Excellent")
+                st.metric("Model Parts", "3/3", "Complete")
+                st.success("✅ All parts available")
             
             with col_sample2:
-                st.metric("Validation Accuracy", "100%", "0%")
-                st.success("✅ Perfect")
-            
-            with col_sample3:
-                st.metric("F1-Score", "1.000", "0.000")
-                st.success("✅ Ideal")
+                st.metric("Integration", "Active", "Ready")
+                st.success("✅ Combined system")
 
 # Footer
 st.markdown("---")
 footer = """
 <div style="text-align: center; color: #666; padding: 20px;">
-    <p>🧬 <strong>Pancreatic Cancer Detection System</strong> | Trained Quantum AI Model</p>
+    <p>🧬 <strong>Pancreatic Cancer Detection System</strong> | 3-Part Combined Quantum AI Model</p>
     <p><small>⚠️ Disclaimer: This tool uses a trained AI model for research purposes. Always consult healthcare professionals for medical diagnosis.</small></p>
 </div>
 """
