@@ -262,7 +262,7 @@ def main():
     
     for i, (part, status) in enumerate(parts_status.items()):
         if status["exists"]:
-            bg_color = "#d4edda" if status["exists"] else "#f8d7da"
+            bg_color = "#d4edda"
             if i == 0: 
                 col1.markdown(f'<div class="part-status" style="background-color: {bg_color}">✅ {part}<br>{status["size"]}</div>', unsafe_allow_html=True)
             elif i == 1: 
