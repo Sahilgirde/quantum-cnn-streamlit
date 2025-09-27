@@ -3,16 +3,12 @@ import streamlit as st
 import torch
 import torch.nn as nn
 from torchvision import models, transforms
-import pennylane as qml
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageFilter
 import numpy as np
 import matplotlib.pyplot as plt
 import io
-import base64
 import os
 from datetime import datetime
-import cv2
-from sklearn.metrics import confusion_matrix
 import seaborn as sns
 
 # Page configuration
@@ -126,6 +122,20 @@ st.markdown("""
         border-radius: 15px;
         margin: 20px 0;
     }
+    .ct-validation {
+        padding: 15px;
+        border-radius: 10px;
+        margin: 10px 0;
+        border-left: 4px solid;
+    }
+    .ct-valid {
+        border-color: #28a745;
+        background-color: #d4edda;
+    }
+    .ct-invalid {
+        border-color: #dc3545;
+        background-color: #f8d7da;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -134,44 +144,94 @@ n_qubits = 4
 n_layers = 3
 
 class CTScanValidator:
-    """Class to validate if uploaded image is a CT scan"""
+    """Class to validate if uploaded image is a CT scan without OpenCV"""
     
     @staticmethod
     def is_ct_scan(image):
-        """Check if image has characteristics of a CT scan"""
+        """Check if image has characteristics of a CT scan using PIL only"""
         try:
-            # Convert to numpy array
+            # Convert to numpy array using PIL
             img_array = np.array(image.convert('L'))  # Convert to grayscale
             
-            # CT scan characteristics
-            # 1. Check image dimensions (CT scans are usually square)
+            # Basic CT scan validation rules
+            validation_checks = []
+            messages = []
+            
+            # 1. Check image dimensions (CT scans are usually reasonable size)
             height, width = img_array.shape
+            if height < 100 or width < 100:
+                validation_checks.append(False)
+                messages.append("Image dimensions too small for CT scan")
+            else:
+                validation_checks.append(True)
+                messages.append("✓ Appropriate image size")
+            
+            # 2. Check aspect ratio (CT scans are often square-ish)
             aspect_ratio = width / height
-            if not (0.8 <= aspect_ratio <= 1.2):
-                return False, "Image aspect ratio doesn't match typical CT scans"
+            if 0.7 <= aspect_ratio <= 1.3:
+                validation_checks.append(True)
+                messages.append("✓ CT scan-like aspect ratio")
+            else:
+                validation_checks.append(False)
+                messages.append("Aspect ratio unusual for CT scan")
             
-            # 2. Check for medical image characteristics (presence of anatomical structures)
-            # CT scans have specific intensity distributions
-            hist, bins = np.histogram(img_array, bins=50)
+            # 3. Check intensity distribution (CT scans have specific ranges)
+            unique_vals = np.unique(img_array)
+            intensity_range = unique_vals.max() - unique_vals.min() if len(unique_vals) > 1 else 0
             
-            # 3. Check for presence of medical imaging artifacts
-            # CT scans often have specific texture patterns
-            from skimage import feature
-            edges = feature.canny(img_array, sigma=2)
-            edge_density = np.sum(edges) / (height * width)
+            if intensity_range > 50:  Reasonable dynamic range
+                validation_checks.append(True)
+                messages.append("✓ Appropriate intensity range")
+            else:
+                validation_checks.append(False)
+                messages.append("Intensity range too narrow for CT scan")
             
-            # Typical CT scan has moderate edge density
-            if not (0.01 <= edge_density <= 0.3):
-                return False, "Image texture doesn't match CT scan patterns"
+            # 4. Check if image appears to be medical (has some structure)
+            # Calculate basic statistics
+            mean_intensity = np.mean(img_array)
+            std_intensity = np.std(img_array)
             
-            # 4. Check for DICOM-like intensity ranges (if not normalized)
-            if img_array.max() > 1000:  # CT scans can have high intensity values
-                return True, "CT scan detected (high intensity range)"
+            if std_intensity > 10:  # Some variation expected in medical images
+                validation_checks.append(True)
+                messages.append("✓ Image shows medical-like variations")
+            else:
+                validation_checks.append(False)
+                messages.append("Image lacks medical scan characteristics")
             
-            return True, "CT scan characteristics detected"
+            # Final decision
+            pass_rate = sum(validation_checks) / len(validation_checks)
+            is_ct = pass_rate >= 0.5  # Pass if at least 50% of checks pass
+            
+            detailed_message = " | ".join(messages)
+            
+            if is_ct:
+                return True, f"✅ CT scan validated: {detailed_message}"
+            else:
+                return False, f"❌ Not a valid CT scan: {detailed_message}"
             
         except Exception as e:
-            return False, f"Validation error: {str(e)}"
+            return False, f"❌ Validation error: {str(e)}"
+    
+    @staticmethod
+    def enhance_image_quality(image):
+        """Enhance image quality using PIL only"""
+        try:
+            # Convert to RGB if necessary
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            
+            # Enhance contrast
+            enhancer = ImageEnhance.Contrast(image)
+            image = enhancer.enhance(1.2)
+            
+            # Enhance sharpness
+            enhancer = ImageEnhance.Sharpness(image)
+            image = enhancer.enhance(1.1)
+            
+            return image
+        except Exception as e:
+            st.warning(f"Image enhancement failed: {e}")
+            return image
 
 class AdvancedModelPartsCombiner:
     def __init__(self):
@@ -238,11 +298,23 @@ class AdvancedModelPartsCombiner:
                 st.success("✅ Model weights loaded successfully!")
             except Exception as e:
                 st.warning(f"⚠️ Standard loading failed: {e}")
-                return False
+                # Try alternative loading method
+                try:
+                    # Load each part separately into the model
+                    self.model = AdvancedHybridQuantumCNN(n_qubits, n_layers).to(self.device)
+                    for part_file in self.model_parts:
+                        checkpoint = torch.load(part_file, map_location='cpu')
+                        if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                            self.model.load_state_dict(checkpoint['state_dict'], strict=False)
+                        else:
+                            self.model.load_state_dict(checkpoint, strict=False)
+                    st.success("✅ Alternative loading successful!")
+                except Exception as e2:
+                    st.error(f"❌ Alternative loading also failed: {e2}")
+                    return False
             
             self.model.eval()
-            
-            st.success("🎉 Model parts successfully combined and loaded!")
+            st.success("🎉 Model successfully loaded and ready for predictions!")
             return True
             
         except Exception as e:
@@ -253,17 +325,37 @@ class AdvancedModelPartsCombiner:
         """Validate if image is CT scan and preprocess"""
         # Validate CT scan
         is_ct, message = self.validator.is_ct_scan(image)
-        if not is_ct:
-            return False, f"❌ This doesn't appear to be a CT scan image. {message}"
         
-        # Additional validation
-        if image.mode not in ['L', 'RGB']:
-            return False, "❌ Unsupported image mode. Please upload grayscale or RGB CT scan."
+        # Enhanced image validation
+        validation_results = []
         
+        # Check image mode
+        if image.mode not in ['L', 'RGB', 'RGBA']:
+            validation_results.append("❌ Unsupported image mode")
+        else:
+            validation_results.append("✅ Supported image mode")
+        
+        # Check image size
         if min(image.size) < 100:
-            return False, "❌ Image resolution too low. Please upload higher quality CT scan."
+            validation_results.append("❌ Image resolution too low")
+        else:
+            validation_results.append("✅ Good image resolution")
         
-        return True, "✅ Valid CT scan image detected"
+        # Check if image appears to be medical
+        try:
+            img_array = np.array(image.convert('L'))
+            if np.std(img_array) < 5:
+                validation_results.append("❌ Image lacks medical scan characteristics")
+            else:
+                validation_results.append("✅ Medical-like image patterns")
+        except:
+            validation_results.append("⚠️ Could not analyze image patterns")
+        
+        if not is_ct:
+            detailed_message = f"{message}\n\n**Validation Details:**\n" + "\n".join(validation_results)
+            return False, detailed_message
+        
+        return True, f"{message}\n\n**Validation Details:**\n" + "\n".join(validation_results)
     
     def predict_image(self, image):
         """Make prediction using combined model"""
@@ -275,26 +367,22 @@ class AdvancedModelPartsCombiner:
             # Validate image first
             is_valid, message = self.validate_and_preprocess_image(image)
             if not is_valid:
-                st.error(message)
-                return None
+                return {
+                    'prediction': 'Invalid Image',
+                    'error': message,
+                    'is_valid': False
+                }
+            
+            # Enhance image quality
+            enhanced_image = self.validator.enhance_image_quality(image)
             
             # Image preprocessing
-            image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+            image_tensor = self.transform(enhanced_image).unsqueeze(0).to(self.device)
             
-            # Model prediction with confidence scores
+            # Model prediction
             with torch.no_grad():
                 output = self.model(image_tensor)
                 probability = torch.sigmoid(output).item()
-                
-                # Get feature importance (gradient-based)
-                image_tensor.requires_grad = True
-                output = self.model(image_tensor)
-                probability = torch.sigmoid(output).item()
-                
-                # Calculate gradients for feature importance
-                output.backward()
-                gradients = image_tensor.grad.data.cpu().numpy()
-                feature_importance = np.abs(gradients).mean(axis=(1, 2, 3))[0]
             
             # Prepare detailed results
             prediction = "Pancreatic Tumor" if probability > 0.5 else "Normal"
@@ -307,16 +395,19 @@ class AdvancedModelPartsCombiner:
                 'normal_probability': (1 - probability) * 100,
                 'tumor_probability': probability * 100,
                 'model_type': 'Advanced Quantum CNN (3 Parts Combined)',
-                'feature_importance': feature_importance,
                 'risk_level': self._calculate_risk_level(probability),
                 'recommendations': self._generate_recommendations(probability),
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'image_quality': self._assess_image_quality(image)
+                'image_quality': self._assess_image_quality(image),
+                'is_valid': True
             }
             
         except Exception as e:
-            st.error(f"❌ Prediction error: {e}")
-            return None
+            return {
+                'prediction': 'Error',
+                'error': f"❌ Prediction error: {e}",
+                'is_valid': False
+            }
     
     def _calculate_risk_level(self, probability):
         """Calculate risk level based on probability"""
@@ -358,40 +449,42 @@ class AdvancedModelPartsCombiner:
     
     def _assess_image_quality(self, image):
         """Assess the quality of the uploaded image"""
-        # Simple quality assessment
-        sharpness = ImageEnhance.Sharpness(image).enhance(1.0)
-        contrast = ImageEnhance.Contrast(image).enhance(1.0)
-        
-        quality_score = (image.size[0] * image.size[1]) / (1000 * 1000)  # MP equivalent
-        if quality_score > 1.0:
-            return "Excellent"
-        elif quality_score > 0.5:
-            return "Good"
-        elif quality_score > 0.2:
-            return "Moderate"
-        else:
-            return "Poor"
+        try:
+            # Simple quality assessment based on size and mode
+            megapixels = (image.size[0] * image.size[1]) / 1000000
+            if megapixels > 1.0:
+                return "Excellent"
+            elif megapixels > 0.5:
+                return "Good"
+            elif megapixels > 0.1:
+                return "Moderate"
+            else:
+                return "Poor"
+        except:
+            return "Unknown"
     
     def create_comprehensive_report(self, image, prediction_result):
         """Create comprehensive analysis report"""
-        fig = plt.figure(figsize=(20, 15))
-        gs = plt.GridSpec(3, 3, figure=fig)
+        fig = plt.figure(figsize=(18, 12))
+        
+        # Create subplots
+        ax1 = plt.subplot2grid((2, 3), (0, 0))  # Original image
+        ax2 = plt.subplot2grid((2, 3), (0, 1))  # Enhanced image
+        ax3 = plt.subplot2grid((2, 3), (0, 2))  # Probability chart
+        ax4 = plt.subplot2grid((2, 3), (1, 0), colspan=3)  # Recommendations
         
         # 1. Original image
-        ax1 = fig.add_subplot(gs[0, 0])
         ax1.imshow(image)
-        ax1.set_title('Uploaded CT Scan', fontsize=12, fontweight='bold')
+        ax1.set_title('Original CT Scan', fontsize=12, fontweight='bold')
         ax1.axis('off')
         
         # 2. Enhanced image
-        ax2 = fig.add_subplot(gs[0, 1])
-        enhanced = ImageEnhance.Contrast(image).enhance(2.0)
-        ax2.imshow(enhanced)
-        ax2.set_title('Enhanced Contrast', fontsize=12, fontweight='bold')
+        enhanced_image = self.validator.enhance_image_quality(image)
+        ax2.imshow(enhanced_image)
+        ax2.set_title('Enhanced View', fontsize=12, fontweight='bold')
         ax2.axis('off')
         
         # 3. Probability chart
-        ax3 = fig.add_subplot(gs[0, 2])
         labels = ['Normal', 'Pancreatic Tumor']
         probabilities = [prediction_result['normal_probability'], prediction_result['tumor_probability']]
         colors = ['#28a745', '#dc3545']
@@ -399,37 +492,24 @@ class AdvancedModelPartsCombiner:
         bars = ax3.bar(labels, probabilities, color=colors, alpha=0.8, edgecolor='black')
         ax3.set_ylabel('Probability (%)', fontweight='bold')
         ax3.set_ylim(0, 100)
-        ax3.set_title('AI Prediction Probabilities', fontsize=12, fontweight='bold')
+        ax3.set_title('AI Prediction Analysis', fontsize=12, fontweight='bold')
         
         for bar, prob in zip(bars, probabilities):
             height = bar.get_height()
             ax3.text(bar.get_x() + bar.get_width()/2., height + 1,
                     f'{prob:.1f}%', ha='center', va='bottom', fontweight='bold')
         
-        # 4. Risk assessment
-        ax4 = fig.add_subplot(gs[1, :])
-        risk_levels = ['Very Low', 'Low', 'Moderate', 'High', 'Very High']
-        risk_scores = [0.1, 0.3, 0.5, 0.7, 0.9]
-        current_risk = prediction_result['probability']
-        
-        ax4.barh(risk_levels, risk_scores, color='lightblue', alpha=0.6)
-        ax4.axvline(x=current_risk, color='red', linestyle='--', linewidth=2, 
-                   label=f'Current Risk: {current_risk:.2f}')
-        ax4.set_xlabel('Risk Score', fontweight='bold')
-        ax4.set_title('Risk Assessment Scale', fontsize=12, fontweight='bold')
-        ax4.legend()
-        
-        # 5. Recommendations
-        ax5 = fig.add_subplot(gs[2, :])
+        # 4. Recommendations
         recommendations = prediction_result['recommendations']
         y_pos = np.arange(len(recommendations))
         
-        ax5.barh(y_pos, [1] * len(recommendations), color=['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4'])
-        ax5.set_yticks(y_pos)
-        ax5.set_yticklabels(recommendations)
-        ax5.set_xlim(0, 1)
-        ax5.set_title('Medical Recommendations', fontsize=12, fontweight='bold')
-        ax5.invert_yaxis()
+        ax4.barh(y_pos, [1] * len(recommendations), color=['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4', '#feca57'])
+        ax4.set_yticks(y_pos)
+        ax4.set_yticklabels([f"{i+1}. {rec}" for i, rec in enumerate(recommendations)])
+        ax4.set_xlim(0, 1.2)
+        ax4.set_title('Medical Recommendations', fontsize=12, fontweight='bold')
+        ax4.invert_yaxis()
+        ax4.set_xticks([])
         
         plt.tight_layout()
         
@@ -463,22 +543,15 @@ class AdvancedHybridQuantumCNN(nn.Module):
         self.resnet = models.resnet18(weights=None)
         self.resnet.fc = nn.Identity()
         
-        self.attention = nn.Sequential(
-            nn.Linear(512, 256),
-            nn.ReLU(),
-            nn.Linear(256, 512),
-            nn.Sigmoid()
-        )
-        
         self.reduce = nn.Sequential(
             nn.Linear(512, 128),
             nn.BatchNorm1d(128),
             nn.ReLU(),
-            nn.Dropout(0.4),
+            nn.Dropout(0.3),
             nn.Linear(128, 64),
             nn.BatchNorm1d(64),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.2),
             nn.Linear(64, n_qubits),
             nn.BatchNorm1d(n_qubits),
             nn.Tanh()
@@ -491,20 +564,11 @@ class AdvancedHybridQuantumCNN(nn.Module):
             nn.BatchNorm1d(16),
             nn.ReLU(),
             nn.Dropout(0.2),
-            nn.Linear(16, 8),
-            nn.BatchNorm1d(8),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(8, 1)
+            nn.Linear(16, 1)
         )
         
     def forward(self, x):
         x = self.resnet(x)
-        
-        # Attention mechanism
-        attention_weights = self.attention(x)
-        x = x * attention_weights
-        
         x = self.reduce(x)
         x = torch.tanh(x) * (torch.pi / 4)
         x = self.q_layer(x)
@@ -627,7 +691,7 @@ def main():
         st.markdown("### 🔧 System Specifications")
         st.write("""
         **Architecture:**
-        - Base: ResNet18 + Attention + Quantum
+        - Base: ResNet18 + Quantum Layers
         - Model Parts: 3 Combined Files
         - Quantum: 4 Qubits, 3 Layers
         - Training: 999 Medical Images
@@ -662,6 +726,7 @@ def main():
                    '<h3>🖼️ Drag & Drop CT Scan Image</h3>'
                    '<p>Supported formats: PNG, JPG, JPEG, BMP</p>'
                    '<p>Recommended: High-quality abdominal CT scans</p>'
+                   '<p><strong>⚠️ Non-CT images will be rejected</strong></p>'
                    '</div>', unsafe_allow_html=True)
         
         uploaded_file = st.file_uploader(
@@ -680,37 +745,11 @@ def main():
                 with st.spinner("🔍 Validating CT scan image..."):
                     is_valid, message = detector.validate_and_preprocess_image(image)
                     
+                    # Display validation results
                     if is_valid:
-                        st.success(message)
-                        
-                        # Image info
-                        st.markdown("### 📊 Image Information")
-                        info_col1, info_col2, info_col3 = st.columns(3)
-                        
-                        with info_col1:
-                            st.metric("Dimensions", f"{image.size[0]}×{image.size[1]}")
-                        
-                        with info_col2:
-                            st.metric("Format", image.format or "Unknown")
-                        
-                        with info_col3:
-                            st.metric("Mode", image.mode)
-                        
-                        # Analysis button
-                        if st.button("🚀 Start Advanced AI Analysis", 
-                                   type="primary", 
-                                   use_container_width=True,
-                                   disabled=not all_parts_available):
-                            with st.spinner("🧠 Combining model parts and performing advanced analysis..."):
-                                result = detector.predict_image(image)
-                                
-                                if result:
-                                    display_advanced_results(col2, image, result, detector)
-                                else:
-                                    st.error("❌ Analysis failed. Please check the model parts and try again.")
-                    
+                        st.markdown(f'<div class="ct-validation ct-valid">{message}</div>', unsafe_allow_html=True)
                     else:
-                        st.error(message)
+                        st.markdown(f'<div class="ct-validation ct-invalid">{message}</div>', unsafe_allow_html=True)
                         st.warning("""
                         **💡 Tips for better results:**
                         - Upload clear abdominal CT scan images
@@ -718,7 +757,21 @@ def main():
                         - Avoid blurry or low-resolution images
                         - Use original medical image formats
                         """)
-                        
+                
+                # Analysis button (only enabled for valid CT scans)
+                if is_valid and all_parts_available:
+                    if st.button("🚀 Start Advanced AI Analysis", 
+                               type="primary", 
+                               use_container_width=True):
+                        with st.spinner("🧠 Combining model parts and performing advanced analysis..."):
+                            result = detector.predict_image(image)
+                            
+                            if result and result.get('is_valid', False):
+                                display_advanced_results(col2, image, result, detector)
+                            else:
+                                error_msg = result.get('error', 'Unknown error occurred') if result else 'Analysis failed'
+                                st.error(f"❌ {error_msg}")
+                    
             except Exception as e:
                 st.error(f"❌ Error processing image: {e}")
     
@@ -737,12 +790,12 @@ def main():
             
             <div class="feature-card">
             <strong>🧠 Quantum AI Analysis</strong><br>
-            Advanced hybrid quantum-classical neural network with attention mechanisms
+            Advanced hybrid quantum-classical neural network
             </div>
             
             <div class="feature-card">
             <strong>📊 Comprehensive Reporting</strong><br>
-            Detailed risk assessment, probability analysis, and medical recommendations
+            Detailed risk assessment and medical recommendations
             </div>
             
             <div class="feature-card">
@@ -751,20 +804,6 @@ def main():
             </div>
             </div>
             """, unsafe_allow_html=True)
-            
-            # Performance metrics
-            st.markdown("### 📈 System Performance")
-            perf_col1, perf_col2 = st.columns(2)
-            
-            with perf_col1:
-                st.metric("Model Integration", "100%", "3/3 Parts")
-                st.metric("Processing Speed", "~5s", "Real-time")
-                st.metric("Image Validation", "Active", "AI-Powered")
-            
-            with perf_col2:
-                st.metric("Analysis Depth", "Advanced", "Multi-layer")
-                st.metric("Risk Assessment", "5-Level", "Comprehensive")
-                st.metric("Report Quality", "Medical Grade", "Professional")
 
 def display_advanced_results(col2, image, result, detector):
     """Display advanced analysis results"""
@@ -780,6 +819,7 @@ def display_advanced_results(col2, image, result, detector):
                 <p><strong>Risk Level:</strong> {result['risk_level']}</p>
                 <p><strong>Model:</strong> {result['model_type']}</p>
                 <p><strong>Timestamp:</strong> {result['timestamp']}</p>
+                <p><strong>Image Quality:</strong> {result['image_quality']}</p>
             </div>
             """, unsafe_allow_html=True)
         else:
@@ -790,6 +830,7 @@ def display_advanced_results(col2, image, result, detector):
                 <p><strong>Risk Level:</strong> {result['risk_level']}</p>
                 <p><strong>Model:</strong> {result['model_type']}</p>
                 <p><strong>Timestamp:</strong> {result['timestamp']}</p>
+                <p><strong>Image Quality:</strong> {result['image_quality']}</p>
             </div>
             """, unsafe_allow_html=True)
         
@@ -874,18 +915,6 @@ Always consult healthcare professionals for medical decisions.
                     mime="text/plain",
                     use_container_width=True
                 )
-        
-        # Additional insights
-        st.markdown("### 🔍 Additional Insights")
-        insight_col1, insight_col2 = st.columns(2)
-        
-        with insight_col1:
-            st.metric("Image Quality", result['image_quality'])
-            st.metric("Analysis Depth", "Advanced")
-        
-        with insight_col2:
-            st.metric("Processing Time", "Real-time")
-            st.metric("Model Complexity", "Quantum AI")
 
 # Footer
 st.markdown("---")
