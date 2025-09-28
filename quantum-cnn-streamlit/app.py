@@ -1,4 +1,4 @@
-# app.py - IMPROVED INTERFACE & RELIABLE DETECTION
+# app.py - FIXED VERSION
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -63,14 +63,6 @@ st.markdown("""
         background: rgba(255,255,255,0.3);
         overflow: hidden;
     }
-    .confidence-fill {
-        height: 100%;
-        border-radius: 12px;
-        text-align: center;
-        color: white;
-        font-weight: bold;
-        line-height: 25px;
-    }
     .stat-box {
         background: rgba(255,255,255,0.2);
         border-radius: 10px;
@@ -85,17 +77,6 @@ st.markdown("""
         margin: 15px 0;
         color: #333;
         border-left: 5px solid #2E86AB;
-    }
-    .model-status {
-        padding: 10px 15px;
-        border-radius: 8px;
-        margin: 5px 0;
-        text-align: center;
-        font-weight: bold;
-    }
-    .feature-icon {
-        font-size: 2rem;
-        margin-bottom: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -114,10 +95,6 @@ class MedicalAIDetector:
             "quantum-cnn-streamlit/model_part_2.pth", 
             "quantum-cnn-streamlit/model_part_3.pth"
         ]
-        self.valid_ct_patterns = [
-            'pancreas', 'ct', 'scan', 'medical', 'abdominal', 'mri', 
-            'radiology', 'diagnostic', 'clinical', 'patient'
-        ]
 
     def check_model_parts(self):
         """Check if all model parts are available"""
@@ -129,28 +106,6 @@ class MedicalAIDetector:
             else:
                 status[part] = {"exists": False, "size": "Missing"}
         return status
-
-    def is_likely_ct_scan(self, image, filename):
-        """Basic check if image might be a CT scan"""
-        filename_lower = filename.lower()
-        
-        # Check filename for medical terms
-        has_medical_terms = any(term in filename_lower for term in self.valid_ct_patterns)
-        
-        # Check image characteristics
-        img_array = np.array(image)
-        
-        # CT scans often have specific color distributions
-        if len(img_array.shape) == 3:  # Color image
-            gray = np.mean(img_array, axis=2)
-        else:  # Grayscale
-            gray = img_array
-            
-        # CT scans typically have high contrast and specific intensity ranges
-        contrast = np.std(gray)
-        is_high_contrast = contrast > 40  # Adjust based on your data
-        
-        return has_medical_terms or is_high_contrast
 
     def ensure_rgb_image(self, image):
         """Ensure image has 3 channels (RGB)"""
@@ -166,7 +121,10 @@ class MedicalAIDetector:
             missing_parts = [part for part in self.model_parts if not status[part]["exists"]]
             
             if missing_parts:
+                st.error(f"Missing model parts: {missing_parts}")
                 return False
+            
+            st.info("🔗 Combining model parts...")
             
             # Combine all parts
             combined_state_dict = {}
@@ -179,10 +137,11 @@ class MedicalAIDetector:
             self.model.load_state_dict(combined_state_dict)
             self.model.eval()
             
+            st.success("🎉 Model loaded successfully!")
             return True
             
         except Exception as e:
-            st.error(f"Model loading error: {str(e)}")
+            st.error(f"Error loading model: {str(e)}")
             return False
 
     def predict_image(self, image):
@@ -298,8 +257,8 @@ def main():
     st.markdown('<h1 class="main-header">🔬 Pancreatic Cancer AI Detector</h1>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Advanced Deep Learning for Medical Image Analysis</p>', unsafe_allow_html=True)
     
-    # Initialize detector
-    detector = ModelPartsCombiner()
+    # Initialize detector - FIXED: Using correct class name
+    detector = MedicalAIDetector()
     
     # Model status check
     parts_status = detector.check_model_parts()
@@ -307,6 +266,9 @@ def main():
     
     if not all_parts_available:
         st.error("❌ Model files not found. Please ensure all model parts are available.")
+        st.write("Required model parts:")
+        for part, status in parts_status.items():
+            st.write(f"- {part}: {'✅ Found' if status['exists'] else '❌ Missing'}")
         return
     
     # Main interface
@@ -315,7 +277,7 @@ def main():
     with col1:
         st.markdown("""
         <div class="upload-box">
-            <div class="feature-icon">📤</div>
+            <div style="font-size: 2rem; margin-bottom: 10px;">📤</div>
             <h3>Upload Medical Image</h3>
             <p>CT Scan • MRI • Medical Imaging</p>
         </div>
@@ -330,12 +292,6 @@ def main():
         if uploaded_file is not None:
             # Process uploaded image
             image = Image.open(uploaded_file)
-            
-            # Check if image might be a CT scan
-            is_ct_like = detector.is_likely_ct_scan(image, uploaded_file.name)
-            
-            if not is_ct_like:
-                st.warning("⚠️ This may not be a medical CT scan image. Results may be inaccurate.")
             
             # Convert to RGB if needed
             if image.mode != 'RGB':
@@ -356,7 +312,7 @@ def main():
                             # Display results
                             st.markdown("""
                             <div style="text-align: center; margin-bottom: 20px;">
-                                <div class="feature-icon">📊</div>
+                                <div style="font-size: 2rem; margin-bottom: 10px;">📊</div>
                                 <h3>Analysis Results</h3>
                             </div>
                             """, unsafe_allow_html=True)
@@ -427,13 +383,15 @@ def main():
                                 mime="image/png",
                                 use_container_width=True
                             )
+                    else:
+                        st.error("❌ Analysis failed. Please try with a different image.")
     
     # Features section when no file is uploaded
     if uploaded_file is None:
         with col2:
             st.markdown("""
             <div style="text-align: center; padding: 40px 20px;">
-                <div class="feature-icon">🔍</div>
+                <div style="font-size: 2rem; margin-bottom: 10px;">🔍</div>
                 <h3>How It Works</h3>
             </div>
             """, unsafe_allow_html=True)
