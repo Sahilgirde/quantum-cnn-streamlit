@@ -78,7 +78,8 @@ class ModelPartsCombiner:
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
-        self.model_parts = ["model_part_1.pth", "model_part_2.pth", "model_part_3.pth"]
+        self.model_parts = ["quantum-cnn-streamlit/model_part_1.pth", "quantum-cnn-streamlit/model_part_2.pth", "quantum-cnn-streamlit/model_part_3.pth"]
+
     
     def check_model_parts(self):
         """Check if all model parts are available"""
@@ -466,3 +467,4 @@ st.markdown(footer, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
+
