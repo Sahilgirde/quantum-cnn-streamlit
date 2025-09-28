@@ -1,4 +1,4 @@
-# app.py - FIXED IMAGE CHANNELS ISSUE
+# app.py - IMPROVED INTERFACE & RELIABLE DETECTION
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -12,64 +12,95 @@ from datetime import datetime
 
 # Page configuration
 st.set_page_config(
-    page_title="Pancreatic Cancer Detection",
-    page_icon="🧠",
+    page_title="Pancreatic Cancer AI Detector",
+    page_icon="🔬",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# Custom CSS for better styling
+# Professional CSS styling
 st.markdown("""
 <style>
     .main-header {
-        font-size: 3rem;
-        color: #1f77b4;
+        font-size: 2.5rem;
+        color: #2E86AB;
+        text-align: center;
+        margin-bottom: 1rem;
+        font-weight: 700;
+    }
+    .sub-header {
+        font-size: 1.2rem;
+        color: #5D5D5D;
         text-align: center;
         margin-bottom: 2rem;
     }
-    .result-box {
-        padding: 20px;
+    .upload-box {
+        border: 2px dashed #2E86AB;
         border-radius: 10px;
-        margin: 10px 0;
-        border-left: 5px solid;
+        padding: 30px;
+        text-align: center;
+        background-color: #F8F9FA;
+        margin: 20px 0;
     }
-    .normal-result {
-        border-color: #28a745;
-        background-color: #d4edda;
-    }
-    .tumor-result {
-        border-color: #dc3545;
-        background-color: #f8d7da;
-    }
-    .probability-bar {
-        height: 30px;
+    .result-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         border-radius: 15px;
-        margin: 10px 0;
+        padding: 25px;
+        color: white;
+        margin: 15px 0;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
     }
-    .success-banner {
-        background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
-        padding: 15px;
+    .normal-card {
+        background: linear-gradient(135deg, #56ab2f 0%, #a8e6cf 100%);
+    }
+    .tumor-card {
+        background: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%);
+    }
+    .confidence-bar {
+        height: 25px;
+        border-radius: 12px;
+        margin: 10px 0;
+        background: rgba(255,255,255,0.3);
+        overflow: hidden;
+    }
+    .confidence-fill {
+        height: 100%;
+        border-radius: 12px;
+        text-align: center;
+        color: white;
+        font-weight: bold;
+        line-height: 25px;
+    }
+    .stat-box {
+        background: rgba(255,255,255,0.2);
         border-radius: 10px;
-        border-left: 5px solid #28a745;
+        padding: 15px;
         margin: 10px 0;
-    }
-    .part-status {
-        padding: 10px;
-        border-radius: 5px;
-        margin: 5px 0;
         text-align: center;
     }
-    .warning-box {
-        background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
-        padding: 15px;
+    .recommendation-box {
+        background: rgba(255,255,255,0.9);
         border-radius: 10px;
-        border-left: 5px solid #ffc107;
-        margin: 10px 0;
+        padding: 20px;
+        margin: 15px 0;
+        color: #333;
+        border-left: 5px solid #2E86AB;
+    }
+    .model-status {
+        padding: 10px 15px;
+        border-radius: 8px;
+        margin: 5px 0;
+        text-align: center;
+        font-weight: bold;
+    }
+    .feature-icon {
+        font-size: 2rem;
+        margin-bottom: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-class ModelPartsCombiner:
+class MedicalAIDetector:
     def __init__(self):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = None
@@ -78,9 +109,16 @@ class ModelPartsCombiner:
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
-        self.model_parts = ["quantum-cnn-streamlit/model_part_1.pth", "quantum-cnn-streamlit/model_part_2.pth", "quantum-cnn-streamlit/model_part_3.pth"]
+        self.model_parts = [
+            "quantum-cnn-streamlit/model_part_1.pth", 
+            "quantum-cnn-streamlit/model_part_2.pth", 
+            "quantum-cnn-streamlit/model_part_3.pth"
+        ]
+        self.valid_ct_patterns = [
+            'pancreas', 'ct', 'scan', 'medical', 'abdominal', 'mri', 
+            'radiology', 'diagnostic', 'clinical', 'patient'
+        ]
 
-    
     def check_model_parts(self):
         """Check if all model parts are available"""
         status = {}
@@ -91,14 +129,35 @@ class ModelPartsCombiner:
             else:
                 status[part] = {"exists": False, "size": "Missing"}
         return status
-    
+
+    def is_likely_ct_scan(self, image, filename):
+        """Basic check if image might be a CT scan"""
+        filename_lower = filename.lower()
+        
+        # Check filename for medical terms
+        has_medical_terms = any(term in filename_lower for term in self.valid_ct_patterns)
+        
+        # Check image characteristics
+        img_array = np.array(image)
+        
+        # CT scans often have specific color distributions
+        if len(img_array.shape) == 3:  # Color image
+            gray = np.mean(img_array, axis=2)
+        else:  # Grayscale
+            gray = img_array
+            
+        # CT scans typically have high contrast and specific intensity ranges
+        contrast = np.std(gray)
+        is_high_contrast = contrast > 40  # Adjust based on your data
+        
+        return has_medical_terms or is_high_contrast
+
     def ensure_rgb_image(self, image):
         """Ensure image has 3 channels (RGB)"""
         if image.mode != 'RGB':
-            st.info(f"🔄 Converting image from {image.mode} to RGB")
             return image.convert('RGB')
         return image
-    
+
     def combine_and_load_model(self):
         """Combine model parts and load the complete model"""
         try:
@@ -107,32 +166,25 @@ class ModelPartsCombiner:
             missing_parts = [part for part in self.model_parts if not status[part]["exists"]]
             
             if missing_parts:
-                st.error(f"❌ Missing model parts: {missing_parts}")
                 return False
-            
-            st.info("🔗 Combining model parts...")
             
             # Combine all parts
             combined_state_dict = {}
             for part_file in self.model_parts:
                 part_dict = torch.load(part_file, map_location='cpu')
                 combined_state_dict.update(part_dict)
-                st.success(f"✅ Loaded: {part_file} ({status[part_file]['size']})")
             
-            # Create model architecture - EXACTLY matching the saved weights
+            # Create model architecture
             self.model = SimpleCNN().to(self.device)
-            
-            # Load combined weights
             self.model.load_state_dict(combined_state_dict)
             self.model.eval()
             
-            st.success("🎉 Model parts successfully combined and loaded!")
             return True
             
         except Exception as e:
-            st.error(f"❌ Error combining model parts: {e}")
+            st.error(f"Model loading error: {str(e)}")
             return False
-    
+
     def predict_image(self, image):
         """Make prediction using combined model"""
         if self.model is None:
@@ -140,17 +192,11 @@ class ModelPartsCombiner:
                 return None
         
         try:
-            # Ensure image is RGB (3 channels)
+            # Ensure image is RGB
             image_rgb = self.ensure_rgb_image(image)
-            
-            # Debug: Show image info
-            st.info(f"📷 Image mode: {image.mode} → {image_rgb.mode}, Size: {image_rgb.size}")
             
             # Image preprocessing
             image_tensor = self.transform(image_rgb).unsqueeze(0).to(self.device)
-            
-            # Debug: Show tensor shape
-            st.info(f"🔢 Tensor shape: {image_tensor.shape}")
             
             # Model prediction
             with torch.no_grad():
@@ -167,44 +213,57 @@ class ModelPartsCombiner:
                 'probability': probability,
                 'normal_probability': (1 - probability) * 100,
                 'tumor_probability': probability * 100,
-                'model_type': 'Trained CNN Model'
+                'is_high_confidence': confidence > 0.7
             }
             
         except Exception as e:
-            st.error(f"❌ Prediction error: {e}")
-            # Show detailed tensor info
-            try:
-                if 'image_tensor' in locals():
-                    st.info(f"📊 Tensor details - Shape: {image_tensor.shape}, Min: {image_tensor.min():.3f}, Max: {image_tensor.max():.3f}")
-            except:
-                pass
+            st.error(f"Analysis failed: {str(e)}")
             return None
-    
-    def create_report_image(self, image, prediction_result):
-        """Create analysis report image"""
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+
+    def create_medical_report(self, image, prediction_result, filename):
+        """Create comprehensive medical report"""
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
+        fig.suptitle('Medical Imaging Analysis Report', fontsize=16, fontweight='bold')
         
-        # Original image (convert to RGB for display)
+        # Original image
         display_image = self.ensure_rgb_image(image)
         ax1.imshow(display_image)
-        ax1.set_title('Uploaded CT Scan', fontsize=14, fontweight='bold')
+        ax1.set_title('Uploaded Medical Image', fontweight='bold')
         ax1.axis('off')
         
         # Probability chart
-        labels = ['Normal', 'Pancreatic Tumor']
+        labels = ['Normal Tissue', 'Pancreatic Tumor']
         probabilities = [prediction_result['normal_probability'], prediction_result['tumor_probability']]
-        colors = ['#28a745', '#dc3545']
+        colors = ['#56ab2f', '#ff416c']
         
-        bars = ax2.bar(labels, probabilities, color=colors, alpha=0.7, edgecolor='black')
-        ax2.set_ylabel('Probability (%)', fontweight='bold')
+        bars = ax2.bar(labels, probabilities, color=colors, alpha=0.8, edgecolor='black')
+        ax2.set_ylabel('Confidence (%)', fontweight='bold')
         ax2.set_ylim(0, 100)
-        ax2.set_title('Model Predictions', fontsize=14, fontweight='bold')
+        ax2.set_title('AI Analysis Results', fontweight='bold')
         
-        # Add value labels on bars
+        # Add value labels
         for bar, prob in zip(bars, probabilities):
             height = bar.get_height()
             ax2.text(bar.get_x() + bar.get_width()/2., height + 1,
                     f'{prob:.1f}%', ha='center', va='bottom', fontweight='bold')
+        
+        # Confidence indicator
+        confidence_level = prediction_result['confidence']
+        ax3.barh(['Model Confidence'], [confidence_level], color='#2E86AB', alpha=0.7)
+        ax3.set_xlim(0, 100)
+        ax3.set_xlabel('Confidence Level (%)', fontweight='bold')
+        ax3.set_title('Analysis Reliability', fontweight='bold')
+        ax3.text(confidence_level/2, 0, f'{confidence_level:.1f}%', 
+                ha='center', va='center', color='white', fontweight='bold')
+        
+        # Risk assessment
+        risk_level = "HIGH" if prediction_result['prediction'] == "Pancreatic Tumor" else "LOW"
+        risk_color = '#ff416c' if risk_level == "HIGH" else '#56ab2f'
+        ax4.text(0.5, 0.6, risk_level, fontsize=40, ha='center', va='center', 
+                color=risk_color, fontweight='bold')
+        ax4.text(0.5, 0.3, 'RISK LEVEL', fontsize=15, ha='center', va='center')
+        ax4.set_title('Clinical Risk Assessment', fontweight='bold')
+        ax4.axis('off')
         
         plt.tight_layout()
         
@@ -214,24 +273,21 @@ class ModelPartsCombiner:
         buf.seek(0)
         return buf
 
-# CORRECT MODEL ARCHITECTURE - Matching your saved weights
+# Model Architecture
 class SimpleCNN(nn.Module):
     def __init__(self):
         super().__init__()
-        # Using ResNet18 with custom fc layer (EXACTLY as per your saved weights)
         self.resnet = models.resnet18(weights=None)
-        
-        # This matches the saved weights: "resnet.fc.0.weight", "resnet.fc.0.bias", etc.
         self.resnet.fc = nn.Sequential(
-            nn.Linear(512, 256),           # resnet.fc.0
-            nn.BatchNorm1d(256),           # resnet.fc.1
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
             nn.ReLU(),
             nn.Dropout(0.5),
-            nn.Linear(256, 128),           # resnet.fc.4
-            nn.BatchNorm1d(128),           # resnet.fc.5
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
             nn.ReLU(),
             nn.Dropout(0.3),
-            nn.Linear(128, 1)              # resnet.fc.8
+            nn.Linear(128, 1)
         )
     
     def forward(self, x):
@@ -239,232 +295,173 @@ class SimpleCNN(nn.Module):
 
 def main():
     # Header
-    st.markdown('<h1 class="main-header">🧠 Pancreatic Cancer Detection System</h1>', 
-                unsafe_allow_html=True)
-    st.markdown("### 🔗 **Trained CNN Model** - Medical AI Diagnosis")
-    
-    # Image format warning
-    st.markdown("""
-    <div class="warning-box">
-    📷 <strong>Image Requirements:</strong> Model expects 3-channel RGB images. 
-    Grayscale/BW images will be automatically converted to RGB.
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">🔬 Pancreatic Cancer AI Detector</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Advanced Deep Learning for Medical Image Analysis</p>', unsafe_allow_html=True)
     
     # Initialize detector
     detector = ModelPartsCombiner()
     
-    # Check model parts status
-    st.subheader("📁 Model Parts Status")
+    # Model status check
     parts_status = detector.check_model_parts()
+    all_parts_available = all(status["exists"] for status in parts_status.values())
     
-    col1, col2, col3 = st.columns(3)
-    all_parts_available = True
+    if not all_parts_available:
+        st.error("❌ Model files not found. Please ensure all model parts are available.")
+        return
     
-    for i, (part, status) in enumerate(parts_status.items()):
-        if status["exists"]:
-            bg_color = "#d4edda"
-            if i == 0: 
-                col1.markdown(f'<div class="part-status" style="background-color: {bg_color}">✅ {part}<br>{status["size"]}</div>', unsafe_allow_html=True)
-            elif i == 1: 
-                col2.markdown(f'<div class="part-status" style="background-color: {bg_color}">✅ {part}<br>{status["size"]}</div>', unsafe_allow_html=True)
-            else: 
-                col3.markdown(f'<div class="part-status" style="background-color: {bg_color}">✅ {part}<br>{status["size"]}</div>', unsafe_allow_html=True)
-        else:
-            all_parts_available = False
-            if i == 0: 
-                col1.error(f"❌ {part}\nMissing")
-            elif i == 1: 
-                col2.error(f"❌ {part}\nMissing")
-            else: 
-                col3.error(f"❌ {part}\nMissing")
-    
-    if all_parts_available:
-        st.markdown("""
-        <div class="success-banner">
-        🎉 <strong>ALL MODEL PARTS READY!</strong> | 
-        🔗 <strong>3 Parts Combined</strong> | 
-        🧠 <strong>Trained CNN Active</strong>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.error("❌ Please ensure all 3 model parts are available in the same directory")
-    
-    # Sidebar
-    with st.sidebar:
-        st.image("https://cdn-icons-png.flaticon.com/512/4712/4712035.png", width=100)
-        st.title("Navigation")
-        
-        if all_parts_available:
-            st.markdown("""
-            <div class="success-banner">
-            🔬 <strong>Model Ready</strong><br>
-            ✅ 3 Parts Integrated
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.warning("⚠️ **Model Parts Missing**")
-        
-        st.info("""
-        **Instructions:**
-        1. Upload CT scan image (RGB/Grayscale)
-        2. Image auto-converted to RGB
-        3. Click 'Analyze with Trained Model'
-        4. Get AI diagnosis
-        """)
-        
-        st.markdown("---")
-        st.subheader("Image Requirements")
-        st.write("""
-        **Supported Formats:**
-        - RGB Images (3 channels)
-        - Grayscale (auto-converted)
-        - PNG, JPG, JPEG, BMP
-        
-        **Model Input:**
-        - Size: 224×224 pixels
-        - Channels: 3 (RGB)
-        - Normalized: ImageNet stats
-        """)
-        
-        st.markdown("---")
-        st.write(f"**Last Updated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Main content area
+    # Main interface
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        st.subheader("📤 Upload CT Scan Image")
+        st.markdown("""
+        <div class="upload-box">
+            <div class="feature-icon">📤</div>
+            <h3>Upload Medical Image</h3>
+            <p>CT Scan • MRI • Medical Imaging</p>
+        </div>
+        """, unsafe_allow_html=True)
         
         uploaded_file = st.file_uploader(
-            "Choose a pancreatic CT scan image",
+            "Select medical image for analysis",
             type=['png', 'jpg', 'jpeg', 'bmp'],
-            help="Supported formats: PNG, JPG, JPEG, BMP - RGB or Grayscale"
+            help="Supported formats: PNG, JPG, JPEG, BMP"
         )
         
-        if uploaded_file is not None and all_parts_available:
-            # Display uploaded image
+        if uploaded_file is not None:
+            # Process uploaded image
             image = Image.open(uploaded_file)
             
-            # Show image info
-            st.info(f"📷 Original Image: {image.mode} mode, Size: {image.size}")
+            # Check if image might be a CT scan
+            is_ct_like = detector.is_likely_ct_scan(image, uploaded_file.name)
+            
+            if not is_ct_like:
+                st.warning("⚠️ This may not be a medical CT scan image. Results may be inaccurate.")
             
             # Convert to RGB if needed
             if image.mode != 'RGB':
                 image_rgb = image.convert('RGB')
-                st.success(f"🔄 Converted to RGB: {image_rgb.mode} mode")
-                display_image = image_rgb
+                st.info(f"🔄 Image converted from {image.mode} to RGB")
             else:
-                display_image = image
+                image_rgb = image
             
-            st.image(display_image, caption="Uploaded CT Scan (RGB)", use_column_width=True)
+            st.image(image_rgb, caption=f"Uploaded Image: {uploaded_file.name}", use_container_width=True)
             
             # Analysis button
-            if st.button("🔬 Analyze with Trained Model", type="primary", use_container_width=True):
-                with st.spinner("Processing image and analyzing..."):
-                    # Get prediction from combined model
-                    result = detector.predict_image(image)  # Use original image, conversion happens inside
+            if st.button("🧠 Analyze Medical Image", type="primary", use_container_width=True):
+                with st.spinner("🔍 Analyzing image with AI model..."):
+                    result = detector.predict_image(image)
                     
                     if result:
-                        # Display results
                         with col2:
-                            st.subheader("📊 Medical Analysis Results")
-                            
-                            # Result box
-                            result_class = "tumor-result" if result['prediction'] == "Pancreatic Tumor" else "normal-result"
-                            result_icon = "⚠️" if result['prediction'] == "Pancreatic Tumor" else "✅"
-                            
-                            st.markdown(f"""
-                            <div class="result-box {result_class}">
-                                <h3>{result_icon} {result['prediction']}</h3>
-                                <p><strong>Model Confidence:</strong> {result['confidence']:.1f}%</p>
-                                <p><strong>Model Type:</strong> {result['model_type']}</p>
+                            # Display results
+                            st.markdown("""
+                            <div style="text-align: center; margin-bottom: 20px;">
+                                <div class="feature-icon">📊</div>
+                                <h3>Analysis Results</h3>
                             </div>
                             """, unsafe_allow_html=True)
                             
-                            # Probability bars
-                            st.write("**Probability Distribution:**")
+                            # Result card
+                            card_class = "tumor-card" if result['prediction'] == "Pancreatic Tumor" else "normal-card"
+                            result_icon = "⚠️" if result['prediction'] == "Pancreatic Tumor" else "✅"
                             
-                            col21, col22 = st.columns(2)
-                            with col21:
-                                st.write("Normal:")
+                            st.markdown(f"""
+                            <div class="result-card {card_class}">
+                                <h2>{result_icon} {result['prediction']}</h2>
+                                <div class="stat-box">
+                                    <h3>AI Confidence: {result['confidence']:.1f}%</h3>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # Probability distribution
+                            st.write("### Confidence Distribution")
+                            
+                            col_prob1, col_prob2 = st.columns(2)
+                            with col_prob1:
+                                st.metric("Normal Tissue", f"{result['normal_probability']:.1f}%")
                                 st.progress(result['normal_probability']/100)
-                                st.write(f"{result['normal_probability']:.1f}%")
                             
-                            with col22:
-                                st.write("Pancreatic Tumor:")
+                            with col_prob2:
+                                st.metric("Pancreatic Tumor", f"{result['tumor_probability']:.1f}%")
                                 st.progress(result['tumor_probability']/100)
-                                st.write(f"{result['tumor_probability']:.1f}%")
                             
-                            # Recommendation
+                            # Medical recommendations
+                            st.markdown("### 🩺 Clinical Recommendations")
+                            
                             if result['prediction'] == "Pancreatic Tumor":
-                                st.error("""
-                                **🚨 Medical Recommendation:** 
-                                - Consult oncologist immediately
-                                - Further diagnostic tests required
-                                - Multidisciplinary team evaluation
-                                - Urgent treatment planning
-                                """)
+                                st.markdown("""
+                                <div class="recommendation-box">
+                                    <h4>🚨 Urgent Action Required:</h4>
+                                    <ul>
+                                        <li>Consult oncologist immediately</li>
+                                        <li>Schedule follow-up CT/MRI</li>
+                                        <li>Blood tests (CA19-9, CEA)</li>
+                                        <li>Multidisciplinary team review</li>
+                                        <li>Consider biopsy confirmation</li>
+                                    </ul>
+                                </div>
+                                """, unsafe_allow_html=True)
                             else:
-                                st.success("""
-                                **✅ Medical Recommendation:** 
-                                - Routine follow-up in 6-12 months
-                                - Continue healthy lifestyle
-                                - Regular health check-ups
-                                - No immediate concerns
-                                """)
+                                st.markdown("""
+                                <div class="recommendation-box">
+                                    <h4>✅ Routine Monitoring:</h4>
+                                    <ul>
+                                        <li>Regular follow-up in 6-12 months</li>
+                                        <li>Maintain healthy lifestyle</li>
+                                        <li>Monitor for symptoms</li>
+                                        <li>Annual health check-ups</li>
+                                    </ul>
+                                </div>
+                                """, unsafe_allow_html=True)
                             
-                            # Generate and display report image
-                            report_buf = detector.create_report_image(image, result)
-                            st.image(report_buf, caption="Medical Analysis Report", use_column_width=True)
+                            # Generate and display report
+                            report_buf = detector.create_medical_report(image, result, uploaded_file.name)
+                            st.image(report_buf, caption="Comprehensive Medical Analysis Report", use_container_width=True)
                             
-                            # Download report
+                            # Download button
                             st.download_button(
-                                label="📥 Download Analysis Report",
+                                label="📥 Download Full Medical Report",
                                 data=report_buf.getvalue(),
-                                file_name=f"medical_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                                file_name=f"medical_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
                                 mime="image/png",
                                 use_container_width=True
                             )
-                    else:
-                        st.error("❌ Prediction failed. Please check the image format.")
     
-    # Info section if no file uploaded
-    if uploaded_file is None and all_parts_available:
+    # Features section when no file is uploaded
+    if uploaded_file is None:
         with col2:
-            st.subheader("ℹ️ Image Processing Info")
+            st.markdown("""
+            <div style="text-align: center; padding: 40px 20px;">
+                <div class="feature-icon">🔍</div>
+                <h3>How It Works</h3>
+            </div>
+            """, unsafe_allow_html=True)
             
-            st.info("""
-            **Automatic Image Processing:**
+            features = [
+                {"icon": "📷", "title": "Upload CT Scan", "desc": "Upload abdominal CT scan images for analysis"},
+                {"icon": "🧠", "title": "AI Analysis", "desc": "Deep learning model analyzes image patterns"},
+                {"icon": "📊", "title": "Get Results", "desc": "Receive detailed probability analysis"},
+                {"icon": "🩺", "title": "Clinical Guidance", "desc": "Evidence-based medical recommendations"}
+            ]
             
-            🔄 **Format Conversion:**
-            - Grayscale → RGB (3 channels)
-            - Black & White → RGB  
-            - RGBA → RGB (alpha removed)
-            
-            📊 **Preprocessing Steps:**
-            1. Resize to 224×224 pixels
-            2. Convert to RGB if needed
-            3. Normalize with ImageNet statistics
-            4. Convert to PyTorch tensor
-            
-            ✅ **Supported Modes:**
-            - RGB (3 channels)
-            - L (Grayscale)
-            - LA (Grayscale + Alpha)
-            - RGBA (RGB + Alpha)
-            """)
+            for feature in features:
+                st.markdown(f"""
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 10px; margin: 10px 0; border-left: 4px solid #2E86AB;">
+                    <div style="font-size: 1.5rem; margin-bottom: 5px;">{feature['icon']}</div>
+                    <strong>{feature['title']}</strong><br>
+                    <small>{feature['desc']}</small>
+                </div>
+                """, unsafe_allow_html=True)
 
 # Footer
 st.markdown("---")
-footer = """
+st.markdown("""
 <div style="text-align: center; color: #666; padding: 20px;">
-    <p>🧬 <strong>Pancreatic Cancer Detection System</strong> | Trained CNN Model</p>
-    <p><small>⚠️ Disclaimer: This tool uses a trained AI model for research purposes. Always consult healthcare professionals for medical diagnosis.</small></p>
+    <p><strong>🔬 Pancreatic Cancer AI Detection System</strong></p>
+    <p><small>For research and educational purposes. Always consult healthcare professionals for medical diagnosis.</small></p>
 </div>
-"""
-st.markdown(footer, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
-
