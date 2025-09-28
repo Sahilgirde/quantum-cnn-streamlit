@@ -1,4 +1,4 @@
-# app.py - FIXED ARCHITECTURE MATCHING
+# app.py - FIXED IMAGE CHANNELS ISSUE
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -59,6 +59,13 @@ st.markdown("""
         margin: 5px 0;
         text-align: center;
     }
+    .warning-box {
+        background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+        padding: 15px;
+        border-radius: 10px;
+        border-left: 5px solid #ffc107;
+        margin: 10px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -71,8 +78,7 @@ class ModelPartsCombiner:
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
-        self.model_parts = ["quantum-cnn-streamlit/model_part_1.pth", "quantum-cnn-streamlit/model_part_2.pth", "quantum-cnn-streamlit/model_part_3.pth"]
-
+        self.model_parts = ["model_part_1.pth", "model_part_2.pth", "model_part_3.pth"]
     
     def check_model_parts(self):
         """Check if all model parts are available"""
@@ -84,6 +90,13 @@ class ModelPartsCombiner:
             else:
                 status[part] = {"exists": False, "size": "Missing"}
         return status
+    
+    def ensure_rgb_image(self, image):
+        """Ensure image has 3 channels (RGB)"""
+        if image.mode != 'RGB':
+            st.info(f"🔄 Converting image from {image.mode} to RGB")
+            return image.convert('RGB')
+        return image
     
     def combine_and_load_model(self):
         """Combine model parts and load the complete model"""
@@ -105,9 +118,6 @@ class ModelPartsCombiner:
                 combined_state_dict.update(part_dict)
                 st.success(f"✅ Loaded: {part_file} ({status[part_file]['size']})")
             
-            # Debug: Show loaded keys
-            st.info(f"📊 Loaded {len(combined_state_dict)} parameters")
-            
             # Create model architecture - EXACTLY matching the saved weights
             self.model = SimpleCNN().to(self.device)
             
@@ -120,39 +130,7 @@ class ModelPartsCombiner:
             
         except Exception as e:
             st.error(f"❌ Error combining model parts: {e}")
-            # Show detailed error info
-            st.info("🔍 Debug Info: Checking model architecture vs saved weights...")
-            self.debug_model_weights(combined_state_dict)
             return False
-    
-    def debug_model_weights(self, saved_state_dict):
-        """Debug model architecture vs saved weights"""
-        try:
-            # Create model
-            test_model = SimpleCNN()
-            
-            # Get model state dict keys
-            model_keys = set(test_model.state_dict().keys())
-            saved_keys = set(saved_state_dict.keys())
-            
-            st.write("**🔍 Architecture vs Saved Weights Analysis:**")
-            
-            # Missing keys
-            missing_in_saved = model_keys - saved_keys
-            if missing_in_saved:
-                st.error(f"❌ Missing in saved: {list(missing_in_saved)}")
-            
-            # Extra keys
-            extra_in_saved = saved_keys - model_keys
-            if extra_in_saved:
-                st.warning(f"⚠️ Extra in saved: {list(extra_in_saved)}")
-            
-            # Common keys
-            common_keys = model_keys.intersection(saved_keys)
-            st.success(f"✅ Common keys: {len(common_keys)}")
-            
-        except Exception as e:
-            st.error(f"❌ Debug error: {e}")
     
     def predict_image(self, image):
         """Make prediction using combined model"""
@@ -161,8 +139,17 @@ class ModelPartsCombiner:
                 return None
         
         try:
+            # Ensure image is RGB (3 channels)
+            image_rgb = self.ensure_rgb_image(image)
+            
+            # Debug: Show image info
+            st.info(f"📷 Image mode: {image.mode} → {image_rgb.mode}, Size: {image_rgb.size}")
+            
             # Image preprocessing
-            image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+            image_tensor = self.transform(image_rgb).unsqueeze(0).to(self.device)
+            
+            # Debug: Show tensor shape
+            st.info(f"🔢 Tensor shape: {image_tensor.shape}")
             
             # Model prediction
             with torch.no_grad():
@@ -184,14 +171,21 @@ class ModelPartsCombiner:
             
         except Exception as e:
             st.error(f"❌ Prediction error: {e}")
+            # Show detailed tensor info
+            try:
+                if 'image_tensor' in locals():
+                    st.info(f"📊 Tensor details - Shape: {image_tensor.shape}, Min: {image_tensor.min():.3f}, Max: {image_tensor.max():.3f}")
+            except:
+                pass
             return None
     
     def create_report_image(self, image, prediction_result):
         """Create analysis report image"""
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
         
-        # Original image
-        ax1.imshow(image)
+        # Original image (convert to RGB for display)
+        display_image = self.ensure_rgb_image(image)
+        ax1.imshow(display_image)
         ax1.set_title('Uploaded CT Scan', fontsize=14, fontweight='bold')
         ax1.axis('off')
         
@@ -247,6 +241,14 @@ def main():
     st.markdown('<h1 class="main-header">🧠 Pancreatic Cancer Detection System</h1>', 
                 unsafe_allow_html=True)
     st.markdown("### 🔗 **Trained CNN Model** - Medical AI Diagnosis")
+    
+    # Image format warning
+    st.markdown("""
+    <div class="warning-box">
+    📷 <strong>Image Requirements:</strong> Model expects 3-channel RGB images. 
+    Grayscale/BW images will be automatically converted to RGB.
+    </div>
+    """, unsafe_allow_html=True)
     
     # Initialize detector
     detector = ModelPartsCombiner()
@@ -304,20 +306,24 @@ def main():
         
         st.info("""
         **Instructions:**
-        1. Ensure all 3 model parts are available
-        2. Upload pancreatic CT scan image
+        1. Upload CT scan image (RGB/Grayscale)
+        2. Image auto-converted to RGB
         3. Click 'Analyze with Trained Model'
         4. Get AI diagnosis
         """)
         
         st.markdown("---")
-        st.subheader("Model Architecture")
+        st.subheader("Image Requirements")
         st.write("""
-        **ResNet18-based CNN:**
-        - Custom Fully Connected Layers
-        - Batch Normalization
-        - Dropout Regularization
-        - Binary Classification
+        **Supported Formats:**
+        - RGB Images (3 channels)
+        - Grayscale (auto-converted)
+        - PNG, JPG, JPEG, BMP
+        
+        **Model Input:**
+        - Size: 224×224 pixels
+        - Channels: 3 (RGB)
+        - Normalized: ImageNet stats
         """)
         
         st.markdown("---")
@@ -332,19 +338,31 @@ def main():
         uploaded_file = st.file_uploader(
             "Choose a pancreatic CT scan image",
             type=['png', 'jpg', 'jpeg', 'bmp'],
-            help="Supported formats: PNG, JPG, JPEG, BMP"
+            help="Supported formats: PNG, JPG, JPEG, BMP - RGB or Grayscale"
         )
         
         if uploaded_file is not None and all_parts_available:
             # Display uploaded image
             image = Image.open(uploaded_file)
-            st.image(image, caption="Uploaded CT Scan", use_column_width=True)
+            
+            # Show image info
+            st.info(f"📷 Original Image: {image.mode} mode, Size: {image.size}")
+            
+            # Convert to RGB if needed
+            if image.mode != 'RGB':
+                image_rgb = image.convert('RGB')
+                st.success(f"🔄 Converted to RGB: {image_rgb.mode} mode")
+                display_image = image_rgb
+            else:
+                display_image = image
+            
+            st.image(display_image, caption="Uploaded CT Scan (RGB)", use_column_width=True)
             
             # Analysis button
             if st.button("🔬 Analyze with Trained Model", type="primary", use_container_width=True):
-                with st.spinner("Combining model parts and analyzing..."):
+                with st.spinner("Processing image and analyzing..."):
                     # Get prediction from combined model
-                    result = detector.predict_image(image)
+                    result = detector.predict_image(image)  # Use original image, conversion happens inside
                     
                     if result:
                         # Display results
@@ -408,26 +426,32 @@ def main():
                                 use_container_width=True
                             )
                     else:
-                        st.error("❌ Prediction failed. Please check the model parts.")
+                        st.error("❌ Prediction failed. Please check the image format.")
     
     # Info section if no file uploaded
     if uploaded_file is None and all_parts_available:
         with col2:
-            st.subheader("ℹ️ Model Information")
+            st.subheader("ℹ️ Image Processing Info")
             
             st.info("""
-            **Trained CNN Model System:**
+            **Automatic Image Processing:**
             
-            ✅ **Model Status:** 3 Parts Successfully Integrated
-            ✅ **Architecture:** ResNet18 with Custom FC Layers
-            ✅ **Training:** 999 CT scans, 100% Validation Accuracy
+            🔄 **Format Conversion:**
+            - Grayscale → RGB (3 channels)
+            - Black & White → RGB  
+            - RGBA → RGB (alpha removed)
             
-            **Model Architecture:**
-            - Base: ResNet18 Feature Extractor
-            - Custom Fully Connected Layers
-            - Batch Normalization
-            - Dropout for Regularization
-            - Binary Classification Output
+            📊 **Preprocessing Steps:**
+            1. Resize to 224×224 pixels
+            2. Convert to RGB if needed
+            3. Normalize with ImageNet statistics
+            4. Convert to PyTorch tensor
+            
+            ✅ **Supported Modes:**
+            - RGB (3 channels)
+            - L (Grayscale)
+            - LA (Grayscale + Alpha)
+            - RGBA (RGB + Alpha)
             """)
 
 # Footer
@@ -442,4 +466,3 @@ st.markdown(footer, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
-
